@@ -1,10 +1,11 @@
 import requests
 import json
 from fpdf import FPDF
+import argparse
+import sys
+from urllib parse import quote
 
 # === INPUTS ===
-organization = "your-org"
-pat = "your-pat"
 api_version = "7.1-preview.1"
 
 # === HEADERS ===
@@ -37,25 +38,38 @@ pdf.add_page()
 def get_projects():
     url = f"https://dev.azure.com/{organization}/_apis/projects?api-version={api_version}"
     response = requests.get(url, headers=headers)
-    return response.json().get("value", [])
+    print("Projects Response: ", response.status_code, response.text)
+    text_response_with_bom = response.text
+    text_response_without_bom = text_response_with_bom.encode('utf-8').decode('utf-8-sig')
+    projects = json.loads(text_response_without_bom) 
+    return projects.get("value", [])
 
 # === GET REPOS IN PROJECT ===
 def get_repos(project):
     url = f"https://dev.azure.com/{organization}/{project}/_apis/git/repositories?api-version={api_version}"
     response = requests.get(url, headers=headers)
-    return response.json().get("value", [])
+    text_response_with_bom = response.text
+    text_response_without_bom = text_response_with_bom.encode('utf-8').decode('utf-8-sig')
+    repos = json.loads(text_response_without_bom)
+    return repos.get("value", [])
 
 # === GET BRANCHES ===
 def get_branches(project, repo_id):
     url = f"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repo_id}/refs?filter=refs/heads/&api-version={api_version}"
     response = requests.get(url, headers=headers)
-    return response.json().get("value", [])
+    text_response_with_bom = response.text
+    text_response_without_bom = text_response_with_bom.encode('utf-8').decode('utf-8-sig')
+    branches = json.loads(text_response_without_bom)
+    return branches.get("value", [])
 
 # === GET POLICIES FOR BRANCH ===
 def get_policies(project, repo_id, branch_name):
     url = f"https://dev.azure.com/{organization}/{project}/_apis/policy/configurations?repositoryId={repo_id}&refName={branch_name}&api-version={api_version}"
     response = requests.get(url, headers=headers)
-    return response.json().get("value", [])
+    text_response_with_bom = response.text
+    text_response_without_bom = text_response_with_bom.encode('utf-8').decode('utf-8-sig')
+    policies = json.loads(text_response_without_bom)
+    return policies.get("value", [])
 
 # === MAIN AUDIT LOOP ===
 def audit():
