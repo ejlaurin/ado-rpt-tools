@@ -1,35 +1,67 @@
+# TODO: Get rid of the PDF report generation because we probably want to process the
+#       raw json or feed it back into another process once we make modifications for
+#       what to clean up or fix.
 import requests
 import json
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 import argparse
 import sys
-from urllib parse import quote
+from urllib.parse import quote
+import base64
 
 # === INPUTS ===
+def parse_args():
+    parser = argparse.ArgumentParser(description="Azure DevOps Branch Policy Auditor")
+    parser.add_argument("--org", required=True, help="Azure DevOps organization name (e.g., 'myorg')")
+    parser.add_argument("--pat", required=True, help="Azure DevOps Personal Access Token")
+    parser.add_argument("--output", default="azure_devops_branch_policy_report.pdf", help="Output PDF filename")
+    return parser.parse_args()
+
+args = parse_args()
+organization = args.org.strip()
+pat = args.pat.strip()
+output_file = args.output
 api_version = "7.1-preview.1"
 
 # === HEADERS ===
+# Encode PAT as Basic Auth header
+encoded_pat = base64.b64encode(f":{pat}".encode()).decode()
 headers = {
     "Content-Type": "application/json",
-    "Authorization": f"Basic {requests.auth._basic_auth_str('', pat)}"
+    "Authorization": f"Basic {encoded_pat}"
 }
 
 # === PDF SETUP ===
 class ReportPDF(FPDF):
+    def __init__(self, font_path="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_name="DejaVu", font_size=12):
+        super().__init__()
+        self.font_name = font_name
+        self.font_size = font_size
+        self._register_font(font_path)
+        self.set_font(self.font_name, "", self.font_size)
+
+    def _register_font(self, font_path):
+        try:
+            self.add_font(self.font_name, "", font_path)
+        except RuntimeError:
+            # Font already registered; suppress warning
+            pass
+
     def header(self):
-        self.set_font("Arial", "B", 14)
-        self.cell(0, 10, "Azure DevOps Branch Policy Report", ln=True, align="C")
+        self.set_font(self.font_name, "", self.font_size)
+        self.cell(0, 14, "Azure DevOps Branch Policy Report", new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
         self.ln(5)
 
     def section_title(self, title):
-        self.set_font("Arial", "B", 12)
-        self.cell(0, 10, title, ln=True)
-        self.ln(2)
+        self.set_font(self.font_name, "", self.font_size)
+        self.cell(0, 14, title, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+#        self.ln(2)
 
     def section_body(self, text):
-        self.set_font("Arial", "", 10)
-        self.multi_cell(0, 8, text)
-        self.ln(2)
+        self.set_font(self.font_name, "", self.font_size)
+        self.multi_cell(0, 14, text)
+#        self.ln(2)
 
 pdf = ReportPDF()
 pdf.add_page()
@@ -38,7 +70,6 @@ pdf.add_page()
 def get_projects():
     url = f"https://dev.azure.com/{organization}/_apis/projects?api-version={api_version}"
     response = requests.get(url, headers=headers)
-    print("Projects Response: ", response.status_code, response.text)
     text_response_with_bom = response.text
     text_response_without_bom = text_response_with_bom.encode('utf-8').decode('utf-8-sig')
     projects = json.loads(text_response_without_bom) 
@@ -76,39 +107,39 @@ def audit():
     projects = get_projects()
     for proj in projects:
         project_name = proj["name"]
-        pdf.section_title(f"📁 Project: {project_name}")
+        pdf.section_title(f"Project: {project_name}")
         repos = get_repos(project_name)
 
         for repo in repos:
             repo_name = repo["name"]
             repo_id = repo["id"]
-            pdf.section_title(f"🔍 Repository: {repo_name}")
+            pdf.section_title(f"Repository: {repo_name}")
 
             locked_branches = []
             no_policy_branches = []
             policy_summary = {}
 
-            branches = get_branches(project_name, repo_id)
-            for branch in branches:
-                branch_name = branch["name"]
-                is_locked = branch.get("isLocked", False)
-                policies = get_policies(project_name, repo_id, branch_name)
+#            branches = get_branches(project_name, repo_id)
+#            for branch in branches:
+#                branch_name = branch["name"]
+#                is_locked = branch.get("isLocked", False)
+#                policies = get_policies(project_name, repo_id, branch_name)
 
-                if is_locked:
-                    locked_branches.append(branch_name)
-                if not policies:
-                    no_policy_branches.append(branch_name)
-                else:
-                    policy_summary[branch_name] = [p["type"]["displayName"] for p in policies]
-
-            if locked_branches:
-                pdf.section_body("🔒 Locked Branches:\n" + "\n".join(locked_branches))
-            if no_policy_branches:
-                pdf.section_body("🚫 Branches with No Policies:\n" + "\n".join(no_policy_branches))
-            if policy_summary:
-                pdf.section_body("✅ Branch Policies:")
-                for branch, policies in policy_summary.items():
-                    pdf.section_body(f"  • {branch}:\n    - " + "\n    - ".join(policies))
+#                if is_locked:
+#                    locked_branches.append(branch_name)
+#                if not policies:
+#                    no_policy_branches.append(branch_name)
+#                else:
+#                    policy_summary[branch_name] = [p["type"]["displayName"] for p in policies]
+#
+#            if locked_branches:
+#                pdf.section_body("Locked Branches:\n" + "\n".join(locked_branches))
+#            if no_policy_branches:
+#                pdf.section_body("Branches with No Policies:\n" + "\n".join(no_policy_branches))
+#            if policy_summary:
+#                pdf.section_body("Branch Policies:")
+#                for branch, policies in policy_summary.items():
+#                    pdf.section_body(f"  • {branch}:\n    - " + "\n    - ".join(policies))
 
 # === RUN & SAVE ===
 audit()
