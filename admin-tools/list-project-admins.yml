@@ -1,0 +1,61 @@
+trigger: none
+
+jobs:
+  - job: ListAdminsAcrossProjects
+    displayName: 'List Admins for All Projects'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: AzureCLI@2
+        displayName: 'Enumerate Admins'
+        inputs:
+          azureSubscription: '<Your-Service-Connection-Name>'
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            # Ensure AZURE_DEVOPS_EXT_PAT is available
+            if [ -z "$AZURE_DEVOPS_EXT_PAT" ]; then
+              echo "System.AccessToken is not available. Enable 'Allow scripts to access OAuth token' in pipeline settings."
+              exit 1
+            fi
+
+            # Configure Azure DevOps CLI
+            az devops configure --defaults organization=https://dev.azure.com/$(System.CollectionId)
+
+            echo "Fetching all projects in the organization..."
+            PROJECTS=$(az devops project list --query "value[].name" -o tsv)
+
+            for PROJECT in $PROJECTS; do
+              echo ""
+              echo "🔍 Project: $PROJECT"
+
+              # Get descriptor for Project Administrators group
+              GROUP_DESCRIPTOR=$(az devops security group list \
+                --project "$PROJECT" \
+                --query "graphGroups[?contains(displayName, 'Project Administrators')].descriptor" \
+                -o tsv)
+
+              if [ -z "$GROUP_DESCRIPTOR" ]; then
+                echo "❌ No Project Administrators group found for $PROJECT"
+                continue
+              fi
+
+              echo "Group Descriptor: $GROUP_DESCRIPTOR"
+
+              # List members of the group
+              MEMBERS=$(az devops security group membership list \
+                --id "$GROUP_DESCRIPTOR" \
+                --query "members[].principalName" \
+                -o tsv)
+
+              if [ -z "$MEMBERS" ]; then
+                echo "⚠️ No members found in Project Administrators group for $PROJECT"
+              else
+                echo "👥 Administrators:"
+                for MEMBER in $MEMBERS; do
+                  echo "- $MEMBER"
+                done
+              fi
+            done
+        env:
+          AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
