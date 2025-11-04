@@ -1,0 +1,71 @@
+parameters:
+  - name: variableGroupName
+    type: string
+    default: 'DevOpsAdminSyncVars'
+
+variables:
+  - group: ${{ parameters.variableGroupName }}
+
+jobs:
+  - job: SyncProjectAdminsToAAD
+    displayName: 'Sync DevOps Project Admins to AAD Group'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      - task: AzureCLI@2
+        displayName: 'Enumerate Admins and Sync to AAD'
+        inputs:
+          azureSubscription: $(azureSubscription)
+          scriptType: bash
+          scriptLocation: inlineScript
+          inlineScript: |
+            ORG_URL="https://dev.azure.com/$(System.CollectionId)"
+            echo "🔍 Fetching all projects..."
+            PROJECTS=$(az devops project list --org "$ORG_URL" --query "value[].name" -o tsv)
+
+            declare -A UNIQUE_EMAILS
+
+            for PROJECT in $PROJECTS; do
+              GROUP_DESCRIPTOR=$(az devops security group list \
+                --project "$PROJECT" \
+                --org "$ORG_URL" \
+                --query "graphGroups[?contains(displayName, 'Project Administrators')].descriptor" \
+                -o tsv)
+
+              if [ -z "$GROUP_DESCRIPTOR" ]; then continue; fi
+
+              MEMBERS=$(az devops security group membership list \
+                --id "$GROUP_DESCRIPTOR" \
+                --org "$ORG_URL" \
+                --query "members[].principalName" \
+                -o tsv)
+
+              for EMAIL in $MEMBERS; do
+                UNIQUE_EMAILS["$EMAIL"]=1
+              done
+            done
+
+            echo "📬 Unique Admin Emails:"
+            for EMAIL in "${!UNIQUE_EMAILS[@]}"; do
+              echo "- $EMAIL"
+            done
+
+            echo "🔧 Creating or updating AAD group: $(targetGroupName)"
+
+            GROUP_ID=$(az ad group list --filter "mail eq '$(targetGroupMail)'" --query "[0].id" -o tsv)
+
+            if [ -z "$GROUP_ID" ]; then
+              GROUP_ID=$(az ad group create \
+                --display-name "$(targetGroupName)" \
+                --mail-nickname "$(targetGroupName | tr -d ' ')" \
+                --query "id" -o tsv)
+            fi
+
+            for EMAIL in "${!UNIQUE_EMAILS[@]}"; do
+              USER_ID=$(az ad user show --id "$EMAIL" --query "id" -o tsv)
+              if [ -n "$USER_ID" ]; then
+                az ad group member add --group "$(targetGroupName)" --member-id "$USER_ID"
+              fi
+            done
+        env:
+          AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
